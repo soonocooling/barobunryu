@@ -1,0 +1,11 @@
+---
+description: 바로분류 프로젝트 규칙
+alwaysApply: true
+---
+- 이 저장소의 작업 규칙은 @CLAUDE.md 가 기준이다. 파트별 절차는 tasks/ 폴더에 있다.
+- 기능은 @plan.md 와 @docs/product-spec.md, 함수 시그니처·데이터 형태는 @docs/collab-plan.md 4장을 그대로 따른다.
+- 요청한 사람의 소유 파일(collab-plan 2장)만 수정한다.
+- 파이썬 런타임 의존성은 requests만. Supabase는 db.py를 통해 PostgREST를 직접 호출한다.
+- 키·토큰은 os.environ에서만 읽는다. 하드코딩 금지.
+- 시각은 Asia/Seoul, 금액은 int(원). 사람 이름은 DB에 원문 저장 금지.
+- 원본 서비스 이름·로고를 코드, 봇 문구, README, 대시보드에 쓰지 않는다.

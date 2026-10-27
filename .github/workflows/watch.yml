@@ -1,0 +1,38 @@
+name: watch
+on:
+  schedule:
+    - cron: "*/5 * * * *"        # UTC 기준이지만 5분 간격이라 무관
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: watch                   # 수동 실행과 스케줄이 겹쳐도 한 번에 하나만
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python watch.py
+        env:
+          TZ: Asia/Seoul
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          CP_SALT: ${{ secrets.CP_SALT }}
+      - name: 마지막 상태 저장
+        run: |
+          git config user.name "watch-bot"
+          git config user.email "watch-bot@users.noreply.github.com"
+          git add state.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "update state"
+          git pull --rebase origin main
+          git push

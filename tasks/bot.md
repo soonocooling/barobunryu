@@ -36,7 +36,7 @@ main():
   save_state(state)
 ```
 - `GITHUB_EVENT_NAME == "workflow_dispatch"`일 때 "봇이 살아 있습니다"를 보내던 뼈대 코드는 **삭제한다**(데모 때 스팸이 된다).
-- 보안: `update`의 chat id가 `CHAT_ID`와 다르면 무시한다. 봇 아이디를 아는 누구나 메시지를 보낼 수 있기 때문이다.
+- 보안: `update`의 chat id가 `TELEGRAM_CHAT_ID`와 다르면 무시한다. 봇 아이디를 아는 누구나 메시지를 보낼 수 있기 때문이다.
 
 ## 3. handle_update(u)
 **message**

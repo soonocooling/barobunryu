@@ -186,7 +186,7 @@ state["tg_offset"] = 마지막 update_id + 1 → save_state()
 ### ④ API 손으로 확인 — 15분
 | 권순오 | 조원영 | 박세훈 |
 |---|---|---|
-| 본 봇 생성(`barobunryu_bot` 등, 원본 이름 금지), CHAT_ID 확보 | push-samples를 `tests/fixtures/push_samples.json`(입력 원문 → 기대 Txn)으로 변환 | Hoppscotch나 curl로 카카오 키워드 검색 → JSON 확인 → 경로를 plan.md에 기입 · Supabase 프로젝트 생성, 팀원 초대 |
+| 본 봇 생성(`barobunryu_bot` 등, 원본 이름 금지), TELEGRAM_CHAT_ID 확보 | push-samples를 `tests/fixtures/push_samples.json`(입력 원문 → 기대 Txn)으로 변환 | Hoppscotch나 curl로 카카오 키워드 검색 → JSON 확인 → 경로를 plan.md에 기입 · Supabase 프로젝트 생성, 팀원 초대 |
 
 **끝 기준**: 카카오 응답에서 `category_group_code`를 눈으로 봤고, 경로가 plan.md에 적혀 있다.
 
@@ -385,8 +385,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CP_SALT: ${{ secrets.CP_SALT }}
       - name: 마지막 상태 저장
         run: |
@@ -406,7 +406,7 @@ jobs:
 | SUPABASE_SERVICE_KEY | ○ | ○ | ○ | 브라우저에 절대 노출 금지 |
 | SUPABASE_ANON_KEY | — | — | — | 폰 자동화(inbox insert)에만 사용 |
 | KAKAO_REST_KEY | ○ | — | 박세훈 | 막히면 운영진 공용 키 ⑧ |
-| BOT_TOKEN, CHAT_ID | ○ | — | 권순오 | 로컬 테스트는 각자 테스트 봇으로 |
+| TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | ○ | — | 권순오 | 로컬 테스트는 각자 테스트 봇으로 |
 | CP_SALT | ○ | — | ○ | 임의 긴 문자열, 한 번 정하면 바꾸지 않음 |
 | DASH_PASSWORD | — | ○ | 조원영 | |
 

@@ -6,7 +6,7 @@ import json
 import os
 
 import bot
-from config import ROOT, load_env, now
+from config import ROOT, env, load_env, now
 
 STATE_FILE = ROOT / "state.json"
 
@@ -25,6 +25,8 @@ def save_state(state: dict) -> None:
 
 def main() -> None:
     load_env()
+    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+        env(name)  # 누락된 이름만 알리고 값은 출력하지 않는다.
     state = load_state()
     event = os.environ.get("GITHUB_EVENT_NAME", "local")
     if event in ("workflow_dispatch", "local"):

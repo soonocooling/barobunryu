@@ -10,19 +10,27 @@ TIMEOUT = 10
 
 
 def _url(method: str) -> str:
-    return f"https://api.telegram.org/bot{env('BOT_TOKEN')}/{method}"
+    return f"https://api.telegram.org/bot{env('TELEGRAM_BOT_TOKEN')}/{method}"
 
 
 def send(text: str, buttons: list[list[tuple[str, str]]] | None = None) -> int:
-    """CHAT_ID로 메시지를 보내고 message_id를 돌려준다. buttons = [[(라벨, callback_data), ...], ...]"""
-    payload: dict = {"chat_id": env("CHAT_ID"), "text": text}
+    """TELEGRAM_CHAT_ID로 메시지를 보내고 message_id를 돌려준다. buttons = [[(라벨, callback_data), ...], ...]"""
+    payload: dict = {"chat_id": env("TELEGRAM_CHAT_ID"), "text": text}
     if buttons:
         payload["reply_markup"] = {"inline_keyboard": [
             [{"text": t, "callback_data": d} for t, d in row] for row in buttons
         ]}
-    r = requests.post(_url("sendMessage"), json=payload, timeout=TIMEOUT)
-    r.raise_for_status()
-    return r.json()["result"]["message_id"]
+    # requests 오류에는 토큰이 포함된 URL이 들어갈 수 있으므로 원문을 전파하지 않는다.
+    url = _url("sendMessage")
+    try:
+        r = requests.post(url, json=payload, timeout=TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("ok") is not True:
+            raise ValueError("Telegram API failure")
+        return int(data["result"]["message_id"])
+    except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
+        raise RuntimeError("Telegram 메시지 전송 실패. 설정과 연결 상태를 확인하세요.") from None
 
 
 def get_updates(offset: int) -> list[dict]:

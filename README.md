@@ -20,11 +20,14 @@
 ```bash
 git clone <저장소 URL> && cd barobunryu
 python -m pip install -r requirements-dev.txt
-cp .env.example .env.local      # 값 채우기: HUMAN_TODO.md 5번
 python -m pytest -q
 ```
 그다음 Cursor 터미널에서 `claude`를 실행하고 자기 파트를 시킨다. 예: `파싱 개발 시작해` 또는 `/start parse`
 파트 목록과 담당자는 `CLAUDE.md`에 있다.
+
+테스트에는 비밀값이나 `.env.local`이 필요 없다. 봇을 직접 실행할 때만 환경변수를 설정한다.
+Actions 운영 설정, 선택적인 로컬 설정, Codespaces 실행 방법은
+[텔레그램 Secrets 설정 안내](docs/telegram-secrets.md)를 따른다.
 
 ## 문서
 - `CLAUDE.md` — Claude Code 작업 규칙과 파트 명령표

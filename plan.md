@@ -62,7 +62,7 @@
 - 주소: `GET https://dapi.kakao.com/v2/local/search/keyword.json`
 - 입력값: `query=가맹점명`, `size=1` / 헤더 `Authorization: KakaoAK {KAKAO_REST_KEY}`
 - 쓸 값의 경로: `data["documents"][0]["category_group_code"]`, `data["documents"][0]["category_name"]`
-- 일일 한도: (발급 후 콘솔 '쿼터'에서 확인해 기입)
+- 일일 한도: 키워드로 장소 검색 하루 100,000건 (카카오맵 REST API, 앱 단위). 월간은 전체 API 합쳐 3,000,000건. 새 가맹점이 나올 때만 호출하므로 한도에 걸릴 일은 거의 없다.
 - 우리 호출 간격: 새 가맹점이 나올 때만 호출하고 결과는 `merchant_cache`에 영구 저장한다 → 하루 수십 건 이하
 - 출처 표시 문구: "장소 분류 데이터: Kakao Local API"
 

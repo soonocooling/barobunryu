@@ -1,4 +1,41 @@
 {
-  "_comment": "조원영: docs/push-samples.md의 실제 알림(금액·이름은 가짜로 바꾼 것)을 여기에 옮긴다. expected가 null이면 파싱 실패가 정답.",
-  "samples": []
+  "_comment": "조원영: docs/push-samples.md의 알림(금액·이름은 가짜로 바꾼 것)을 옮긴 것. expected가 null이면 파싱 실패가 정답. raw는 '제목\\n내용'(카카오뱅크는 '앱\\n제목\\n본문', 카카오페이는 채팅창 기준). 시각이 본문에 없으면(카카오뱅크) ts는 수신 시각.",
+  "samples": [
+    {
+      "raw": "하나은행\n출금 6500 원 테스트마트 잔액 80000원 11/03 0:35 ***-******-*****",
+      "expected": {"amount": 6500, "direction": "out", "method": "card", "counterparty": "테스트마트"}
+    },
+    {
+      "raw": "하나은행\n입금 150,000원 홍길동      잔액 230,000원 10/31 22:10 ***-******-***",
+      "expected": {"amount": 150000, "direction": "in", "method": "transfer", "counterparty": "홍길동"}
+    },
+    {
+      "raw": "하나은행\n출금 120,000원 김철수 잔액 110,000원 10/31 22:14 ***-******-***",
+      "expected": {"amount": 120000, "direction": "out", "method": "transfer", "counterparty": "김철수"}
+    },
+    {
+      "raw": "카카오뱅크\n출금 7,000원\n입출금통장(0000) → 카카오페이",
+      "expected": {"amount": 7000, "direction": "out", "method": "transfer", "counterparty": "카카오페이"}
+    },
+    {
+      "raw": "카카오뱅크\n입금 3,500원\n홍길동 → 입출금통장(0000)",
+      "expected": {"amount": 3500, "direction": "in", "method": "transfer", "counterparty": "홍길동"}
+    },
+    {
+      "raw": "카카오페이\n알림톡 도착\n송금금액\n120,000원\n송금이 완료되었어요.\n\n- 일시 : 2026. 11. 1.(일) 18:32\n- 입금계좌 : 하나 1234 (김*수)\n- 수수료 : 무료\n- 거래 후 잔액 : 50,000원",
+      "expected": {"amount": 120000, "direction": "out", "method": "transfer", "counterparty": "김*수"}
+    },
+    {
+      "raw": "카카오페이\n알림톡 도착\n정산이 완료되었어요\n정산이 모두 완료됐어요.\n\n- 정산금액 : 12,000원\n- 요청인원 : 3명\n- 요청일자 : 2026. 10. 28.(수) 12:00",
+      "expected": null
+    },
+    {
+      "raw": "카카오페이\n알림톡 도착\n결제금액\n38,500원\n페이머니 충전 후 결제가 완료되었어요.\n\n- 구매처: 테스트티켓\n- 상품명: 테스트 공연 (Test Live in Korea)\n- 결제일시: 2026.10.16 17:49\n- 결제수단: 카카오페이머니\n- 주문금액: 40,000원\n- 할인금액: 1,500원",
+      "expected": {"amount": 38500, "direction": "out", "method": "card", "counterparty": "테스트티켓"}
+    },
+    {
+      "raw": "카카오페이\n알림톡 도착\n취소금액\n9,900원\n결제가 취소되었어요.\n\n카드 승인 취소는 영업일 기준 최대 5일 소요돼요.\n\n- 구매처: 테스트스타일\n- 상품명: 테스트 상품 10 colors\n- 취소일시: 2026.08.22 21:28\n- 결제수단: 하나카드",
+      "expected": null
+    }
+  ]
 }

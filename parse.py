@@ -48,8 +48,8 @@ def parse_answer(text: str) -> dict:
     text = text.lower()
     if any(word.lower() in text for word in config.keywords().get("skip_words", [])):
         return {**answer, "skip": True, "category": "etc"}
-    # 숫자와 인원 접미사 또는 엔빵 뒤 숫자를 잡는다.
-    match = re.search(r"(\d+)\s*(?:명|빵|인)|엔빵\s*(\d+)", text)
+    # 숫자와 인원 접미사 또는 더치페이·엔빵 뒤 숫자를 잡는다.
+    match = re.search(r"(\d+)\s*(?:명|빵|인)|(?:더치페이|더치|엔빵)\s*(\d+)", text)
     if match:
         n = int(match[1] or match[2])
         if 2 <= n <= 20:
@@ -60,8 +60,8 @@ def parse_answer(text: str) -> dict:
         answer["my_share"] = int(match[1].replace(",", ""))
     elif re.search(r"내\s*몫|내꺼", text):
         answer["my_share_of_other"] = True
-    # "엔빵 3", "3빵"의 '빵'이 카페·간식 키워드(빵)로 잡히지 않게 엔빵 표현은 빼고 찾는다.
-    rest = re.sub(r"엔빵\s*\d*|n빵|\d+\s*(?:명|빵|인)", " ", text)
+    # "엔빵 3", "3빵"의 '빵'이 카페·간식 키워드(빵)로 잡히지 않게 인원 표현은 빼고 찾는다.
+    rest = re.sub(r"(?:더치페이|더치|엔빵)\s*\d*|n빵|\d+\s*(?:명|빵|인)", " ", text)
     best = 0
     for code, category in config.categories().items():
         if category.get("ask", True) is False and code not in {"self", "income"}:

@@ -29,6 +29,17 @@ export type PendingRow = {
   direction: "out" | "in";
   cp_label: string | null;
 };
+type TxnSplit = { n: number; total: number; my_share: number };
+export type TxnRow = {
+  id: number;
+  ts: string;
+  amount: number;
+  direction: "out" | "in";
+  category: string | null;
+  cp_label: string | null;
+  status: "auto" | "pending" | "confirmed";
+  splits: TxnSplit | TxnSplit[] | null;
+};
 export type RuleRow = {
   id: number;
   cp_key: string;
@@ -74,6 +85,18 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function monthly(month: string) {
   return rest<MonthlyRow[]>(`monthly_summary?month=eq.${encodeURIComponent(month)}`);
+}
+
+export function monthTransactions(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m, 1));
+  const end = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+  const bound = (ym: string) => encodeURIComponent(`${ym}-01T00:00:00+09:00`);
+  return rest<TxnRow[]>(
+    `transactions?ts=gte.${bound(month)}&ts=lt.${bound(end)}` +
+      "&select=id,ts,amount,direction,category,cp_label,status,splits(n,total,my_share)" +
+      "&order=ts.desc&limit=100",
+  );
 }
 
 export function openSplits() {

@@ -1,5 +1,5 @@
 """5분마다 GitHub Actions가 실행하는 본체. 담당: 권순오. 절차: tasks/bot.md
-입력 수신 → 거래 생성·분류 → 애매한 것만 질문 → 답장·버튼으로 확정 → 엔빵·정산."""
+입력 수신 → 거래 생성·분류 → 애매한 것만 질문 → 답장·버튼으로 확정 → 더치페이·정산."""
 from __future__ import annotations
 
 import json
@@ -100,7 +100,7 @@ def create_txn(txn: dict, source: str = "tg") -> dict | None:
     name = txn["counterparty"]
     method = txn["method"]
     key = db.cp_key(name, method)
-    # 같은 알림이 두 번 오는 경우만 막는다. 직접 입력은 사람이 일부러 보낸 것이다(엔빵 입금 ×3).
+    # 같은 알림이 두 번 오는 경우만 막는다. 직접 입력은 사람이 일부러 보낸 것이다(더치페이 입금 ×3).
     if source == "auto" and _is_duplicate(txn, key):
         return None
     parties = db.select("counterparties", cp_key=key)
@@ -236,7 +236,7 @@ def apply_answer(txn: dict, ans: dict) -> None:
     if txn.get("status") != "confirmed" or txn.get("category") != category:
         confirm_category(txn, category)
     if txn.get("tg_message_id"):
-        suffix = (f" · {split['n']}명 엔빵 (내 몫 {split['my_share']:,}원, 받을 돈 {split['remaining']:,}원)"
+        suffix = (f" · {split['n']}명 더치페이 (내 몫 {split['my_share']:,}원, 받을 돈 {split['remaining']:,}원)"
                   if split else "")
         bot.edit(txn["tg_message_id"], f"✅ {label(category)}{suffix}")
 
@@ -252,7 +252,7 @@ def _settle(split: dict, txn: dict, matched_by: str) -> int:
 
 
 def match_income(txn: dict) -> None:
-    """입금을 14일 이내의 열린 엔빵에 연결한다. 후보가 없으면 분류 결과를 그대로 둔다."""
+    """입금을 14일 이내의 열린 더치페이에 연결한다. 후보가 없으면 분류 결과를 그대로 둔다."""
     since = (now() - timedelta(days=14)).isoformat(timespec="seconds")
     amount = txn["amount"]
     candidates = [split for split in db.select("splits", status="open", created_at=("gte", since))
@@ -312,7 +312,7 @@ def _buttons(txn: dict, settings: dict) -> list:
         if len(picks) < 2 and code not in picks and categories()[code].get("ask", True):
             picks.append(code)
     rows = [[(label(code), f"c:{txn['id']}:{code}") for code in picks]]
-    split = ("엔빵", f"c:{txn['id']}:split")
+    split = ("더치페이", f"c:{txn['id']}:split")
     other = (label("etc"), f"c:{txn['id']}:etc")
     if _is_split_suspect(txn, current, settings):
         rows.insert(0, [split])

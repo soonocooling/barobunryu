@@ -55,6 +55,8 @@ def _ans(**kw):
     ("치킨 4명", _ans(category="food", split_n=4)),
     ("4명", _ans(split_n=4)),
     ("엔빵 3", _ans(split_n=3)),
+    ("더치페이 3", _ans(split_n=3)),
+    ("더치 3", _ans(split_n=3)),
     ("3빵", _ans(split_n=3)),
     ("내 몫 15,000", _ans(my_share=15000)),
     ("내꺼 8000", _ans(my_share=8000)),

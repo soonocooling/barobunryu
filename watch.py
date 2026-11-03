@@ -363,12 +363,16 @@ def digest(settings: dict, state: dict, t: datetime) -> None:
 
 
 def process_inbox() -> None:
-    """알림 포맷 구현 전에는 원문과 new 상태를 그대로 보존한다."""
+    """처리한 원문은 성공·실패와 상관없이 DB에서 지운다. 못 읽은 알림은 한 번만 알린다."""
     for row in db.select("inbox", status="new"):
         try:
-            txn = parse.parse_push(row["raw_text"])
+            raw = row["raw_text"] or ""
+            txn = parse.parse_push(raw)
             if txn is None:
-                continue  # 샘플 미확보 상태에서 실패/완료로 소진하지 않는다.
+                # 전송이 실패해도 원문이 남지 않게 먼저 지운다.
+                db.update("inbox", {"id": row["id"]}, {"status": "failed", "raw_text": None})
+                bot.send(f"못 읽었어: {raw[:30]}")
+                continue
             create_txn(txn, source="auto")
             db.update("inbox", {"id": row["id"]}, {"status": "done", "raw_text": None})
         except Exception as exc:

@@ -298,6 +298,34 @@ def test_inbox_success_clears_raw_and_dedupes(world):
     assert [(r["raw_text"], r["status"]) for r in world.db.rows("inbox")] == [(None, "done")] * 2
 
 
+def test_inbox_failure_clears_raw_and_notifies_once(world):
+    raw = "못읽음 " + "가" * 40
+    world.db.insert("inbox", {"raw_text": raw, "status": "new"})
+    world.run()
+    world.run()
+    assert [m["text"] for m in world.bot.sent] == [f"못 읽었어: {raw[:30]}"]
+    row = world.db.rows("inbox")[0]
+    assert (row["raw_text"], row["status"]) == (None, "failed")
+
+
+def test_inbox_send_failure_still_clears_raw_and_hides_it_from_logs(world, monkeypatch, capsys):
+    monkeypatch.setattr(world.bot, "send", Mock(side_effect=RuntimeError("전송 실패")))
+    world.db.insert("inbox", {"raw_text": "못읽음 홍길동", "status": "new"})
+    world.run()
+    world.run()
+    world.bot.send.assert_called_once()
+    row = world.db.rows("inbox")[0]
+    assert (row["raw_text"], row["status"]) == (None, "failed")
+    assert "홍길동" not in capsys.readouterr().out
+
+
+def test_inbox_empty_raw_is_marked_failed(world):
+    world.db.insert("inbox", {"raw_text": None, "status": "new"})
+    world.run()
+    assert world.db.rows("inbox")[0]["status"] == "failed"
+    assert [m["text"] for m in world.bot.sent] == ["못 읽었어: "]
+
+
 def test_split_button_then_reply(world):
     question = chicken_question(world)
     txn = world.txns()[0]

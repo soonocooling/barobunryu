@@ -45,7 +45,9 @@ function shortDate(iso: string): string {
 async function safe<T>(job: Promise<T>): Promise<{ data: T | null; failed: boolean }> {
   try {
     return { data: await job, failed: false };
-  } catch {
+  } catch (e) {
+    // 원인은 서버 로그에만 남긴다(상태 코드·테이블 이름뿐, 키는 포함되지 않는다).
+    console.error("[dashboard]", e instanceof Error ? e.message : "알 수 없는 오류");
     return { data: null, failed: true };
   }
 }

@@ -57,12 +57,15 @@ async function rest<T>(path: string, init: RequestInit = {}): Promise<T> {
       },
       cache: "no-store",
     });
-  } catch {
-    // 원문 예외에는 URL이 들어갈 수 있어 메시지를 새로 만든다.
-    throw new DbError("데이터베이스에 연결하지 못했어요.");
+  } catch (e) {
+    // 원문 예외에는 URL이 들어갈 수 있어 오류 코드만 꺼내 메시지를 새로 만든다.
+    const code = (e as { cause?: { code?: string } }).cause?.code ?? (e as Error).name;
+    throw new DbError(`데이터베이스에 연결하지 못했어요 (${code}).`);
   }
   if (!res.ok) {
-    throw new DbError(`데이터베이스 요청이 실패했어요 (${res.status}).`);
+    throw new DbError(
+      `데이터베이스 요청이 실패했어요 (${res.status}, ${path.split("?")[0]}).`,
+    );
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();

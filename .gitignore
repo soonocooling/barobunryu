@@ -6,6 +6,7 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+state.test.json
 .venv/
 venv/
 node_modules/

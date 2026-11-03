@@ -143,22 +143,46 @@ nav.month { display: flex; align-items: center; gap: 14px; font-size: 1.125rem; 
 .rows small { display: block; margin-top: 2px; color: var(--muted); font-size: 0.8125rem; font-weight: 400; }
 .rows span { min-width: 0; overflow-wrap: anywhere; }
 
-/* 주간 띠 */
-.history { border-bottom: 0; padding-top: 18px; }
-.week { display: grid; grid-template-columns: repeat(7, 1fr); margin: 0 -6px 8px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-.day { display: flex; flex-direction: column; align-items: center; min-width: 0; }
-.cell { display: flex; flex-direction: column; align-items: center; width: 42px; padding: 6px 0; border-radius: 12px; }
-.day.on .cell { background: var(--band); }
-.wd { color: var(--muted); font-size: 0.8125rem; }
-.num { margin-top: 2px; font-size: 1.25rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
-.day.later .wd, .day.later .num { color: var(--faint); }
-.daily { min-height: 16px; margin-top: 4px; color: var(--muted); font-size: 0.6875rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 달력 */
+.history { border-bottom: 0; scroll-margin-top: 56px; }
+.calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px 0; margin: 14px -8px 6px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.calendar .wd { padding-bottom: 6px; color: var(--muted); font-size: 0.8125rem; text-align: center; }
+.cal { display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 54px; padding: 6px 0 4px; border-radius: 10px; color: inherit; text-decoration: none; }
+a.cal:hover { background: var(--band); }
+.num { font-size: 1rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.cal.today .num { color: var(--accent); font-weight: 700; }
+.cal.on { background: var(--accent-soft); }
+.cal.later .num { color: var(--faint); }
+.daily { min-height: 14px; margin-top: 3px; color: var(--text-2); font-size: 0.625rem; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.filter { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--band); font-size: 0.875rem; color: var(--text-2); }
+.filter strong { color: var(--text); }
+.filter a { flex: none; color: var(--accent); font-weight: 600; text-decoration: none; }
 
 /* 내역 */
 .date { margin-top: 20px; color: var(--muted); font-size: 0.875rem; font-weight: 500; }
 .txns { margin-top: 4px; }
-.txn { display: flex; align-items: center; gap: 14px; padding: 11px 0; }
-.txn-body { min-width: 0; }
+.txn { display: flex; align-items: center; gap: 14px; padding: 11px 0; color: inherit; text-decoration: none; }
+.txn-body { flex: 1; min-width: 0; }
+.chev { flex: none; width: 8px; height: 8px; border-right: 2px solid var(--faint); border-top: 2px solid var(--faint); transform: rotate(45deg); }
+
+/* 상세 */
+.detail-top { position: sticky; align-items: center; font-weight: 600; font-size: 1.0625rem; }
+.back { position: absolute; left: 20px; top: 50%; width: 12px; height: 12px; border-left: 2px solid var(--text); border-bottom: 2px solid var(--text); transform: translateY(-50%) rotate(45deg); }
+.back::after { content: ""; position: absolute; inset: -14px; }
+.hero-name { display: flex; align-items: center; gap: 10px; font-size: 1rem; font-weight: 500; color: var(--text-2); overflow-wrap: anywhere; }
+.hero-amount { margin-top: 14px; font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hero-amount.in { color: var(--accent); }
+.facts { margin: 18px 0 0; display: grid; gap: 14px; }
+.facts div { display: flex; justify-content: space-between; gap: 16px; font-size: 1rem; }
+.facts dt { color: var(--muted); flex: none; }
+.facts dd { margin: 0; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.facts dd.accent { color: var(--accent); }
+form.dutch { margin-top: 20px; }
+form.undo { margin-top: 10px; text-align: center; }
+.picker { display: grid; gap: 2px; margin-top: 12px; }
+.pick { display: flex; align-items: center; gap: 14px; width: 100%; padding: 8px; border-radius: 14px; background: transparent; color: var(--text); font-size: 1.0625rem; font-weight: 500; text-align: left; }
+.pick:hover { background: var(--band); }
+.pick.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .txn-amount { font-size: 1.125rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .txn-amount.in { color: var(--accent); }
 .txn-sub { margin-top: 1px; color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }

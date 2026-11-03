@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   categoryLabel,
   monthly,
@@ -80,17 +82,13 @@ function mySpend(t: TxnRow): number {
   return splitOf(t)?.my_share ?? t.amount;
 }
 
-/** 현재 달이면 오늘, 지난 달이면 말일이 들어 있는 일~토 7일. */
-function weekDays(month: string, today: string): string[] {
+/** 달력 칸. 1일 앞의 빈칸은 null이다. */
+function monthCells(month: string): (string | null)[] {
   const [y, m] = month.split("-").map(Number);
-  const focus = today.startsWith(month)
-    ? new Date(`${today}T00:00:00Z`)
-    : new Date(Date.UTC(y, m, 0));
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(focus);
-    d.setUTCDate(focus.getUTCDate() - focus.getUTCDay() + i);
-    return d.toISOString().slice(0, 10);
-  });
+  const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const days = Array.from({ length: last }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`);
+  return [...Array<null>(first).fill(null), ...days];
 }
 
 function TxnItem({ t }: { t: TxnRow }) {
@@ -101,18 +99,21 @@ function TxnItem({ t }: { t: TxnRow }) {
     ? `더치페이 ${split.n}명 · 총 ${won(split.total)}`
     : categoryLabel(t.category);
   return (
-    <li className="txn">
-      <CategoryIcon code={t.category} />
-      <div className="txn-body">
-        <p className={`txn-amount${incoming ? " in" : ""}`}>
-          {incoming ? "+" : "-"}
-          {won(split?.my_share ?? t.amount)}
-        </p>
-        <p className="txn-sub">
-          {name} · {detail}
-          {t.status === "pending" && <span className="chip">확인 필요</span>}
-        </p>
-      </div>
+    <li>
+      <Link href={`/txn/${t.id}`} className="txn">
+        <CategoryIcon code={t.category} />
+        <div className="txn-body">
+          <p className={`txn-amount${incoming ? " in" : ""}`}>
+            {incoming ? "+" : "-"}
+            {won(split?.my_share ?? t.amount)}
+          </p>
+          <p className="txn-sub">
+            {name} · {detail}
+            {t.status === "pending" && <span className="chip">확인 필요</span>}
+          </p>
+        </div>
+        <span className="chev" aria-hidden="true" />
+      </Link>
     </li>
   );
 }
@@ -123,6 +124,8 @@ export default async function Home(props: PageProps<"/">) {
   const today = kstDate();
   const thisMonth = today.slice(0, 7);
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(rawMonth) ? rawMonth : thisMonth;
+  const rawDay = typeof params.day === "string" ? params.day : "";
+  const selectedDay = /^\d{4}-\d{2}-\d{2}$/.test(rawDay) && rawDay.startsWith(month) ? rawDay : "";
   const msgKey = typeof params.msg === "string" ? params.msg : "";
   const msg = MESSAGES[msgKey];
 
@@ -192,7 +195,7 @@ export default async function Home(props: PageProps<"/">) {
       <section className="summary">
         <div className="totals">
           <div>
-            <p className="label">지출</p>
+            <p className="label">순지출</p>
             <p className="value">{totalSpent ? `-${won(totalSpent)}` : "0원"}</p>
           </div>
           <div>
@@ -307,39 +310,71 @@ export default async function Home(props: PageProps<"/">) {
         )}
       </section>
 
-      <section className="plain history">
-        <div className="week" aria-label="이번 주 일별 지출">
-          {weekDays(month, today).map((d) => {
-            const spent = d.startsWith(month) ? (spentByDay.get(d) ?? 0) : 0;
+      <section className="plain history" id="history">
+        <p className="label">소비 내역</p>
+        <div className="calendar" aria-label="일별 순지출 달력">
+          {WEEKDAYS.map((w) => (
+            <span key={w} className="wd">
+              {w}
+            </span>
+          ))}
+          {monthCells(month).map((d, i) => {
+            if (!d) return <span key={`blank-${i}`} />;
+            const spent = spentByDay.get(d) ?? 0;
             const num = Number(d.slice(8));
-            const weekday = new Date(`${d}T00:00:00Z`).getUTCDay();
-            return (
-              <div key={d} className={`day${d === today ? " on" : ""}${d > today ? " later" : ""}`}>
-                <div className="cell">
-                  <span className="wd">{WEEKDAYS[weekday]}</span>
-                  <span className="num">{num}</span>
-                </div>
+            const cls = `cal${d === today ? " today" : ""}${d === selectedDay ? " on" : ""}`;
+            const inner = (
+              <>
+                <span className="num">{num}</span>
                 <span className="daily">{spent ? `-${spent.toLocaleString("ko-KR")}` : ""}</span>
-              </div>
+              </>
+            );
+            return d > today ? (
+              <span key={d} className={`${cls} later`}>
+                {inner}
+              </span>
+            ) : (
+              <Link
+                key={d}
+                className={cls}
+                href={d === selectedDay ? `/?month=${month}#history` : `/?month=${month}&day=${d}#history`}
+                aria-current={d === selectedDay ? "date" : undefined}
+                aria-label={`${num}일 ${spent ? `순지출 ${won(spent)}` : "지출 없음"}`}
+              >
+                {inner}
+              </Link>
             );
           })}
         </div>
 
+        {selectedDay && (
+          <div className="filter">
+            <span>
+              {dayLabel(selectedDay)} 순지출 <strong>{won(spentByDay.get(selectedDay) ?? 0)}</strong>
+            </span>
+            <Link href={`/?month=${month}#history`}>전체 보기</Link>
+          </div>
+        )}
+
         {txns.length === 0 ? (
           <p className="empty">이 달의 내역이 없어요.</p>
+        ) : selectedDay && !byDay.has(selectedDay) ? (
+          <p className="empty">이 날은 내역이 없어요.</p>
         ) : (
-          [...byDay.entries()].map(([day, list]) => (
-            <div key={day}>
-              <h3 className="date">{dayLabel(day)}</h3>
-              <ul className="txns">
-                {list.map((t) => (
-                  <TxnItem key={t.id} t={t} />
-                ))}
-              </ul>
-            </div>
-          ))
+          [...byDay.entries()]
+            .filter(([day]) => !selectedDay || day === selectedDay)
+            .map(([day, list]) => (
+              <div key={day}>
+                <h3 className="date">{dayLabel(day)}</h3>
+                <ul className="txns">
+                  {list.map((t) => (
+                    <TxnItem key={t.id} t={t} />
+                  ))}
+                </ul>
+              </div>
+            ))
         )}
-        {txns.length >= 100 && <p className="note">최근 100건까지 보여줘요.</p>}
+        {txns.length >= 1000 && <p className="note">최근 1,000건까지 집계해요.</p>}
       </section>
 
       <details className="fold">

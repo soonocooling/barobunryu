@@ -1,6 +1,7 @@
 import {
   categoryLabel,
   monthly,
+  monthTransactions,
   openSplits,
   pending,
   rules,
@@ -9,21 +10,28 @@ import {
   type PendingRow,
   type RuleRow,
   type SplitRow,
+  type TxnRow,
 } from "@/lib/db";
 import { removeRule, saveSettings } from "./actions";
+import { CategoryIcon } from "./icons";
 
 export const dynamic = "force-dynamic";
 
+const TZ = "Asia/Seoul";
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const LEGEND_LIMIT = 3;
+
 const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
 
-function kstMonth(date = new Date()): string {
+function kstDate(date: Date | string = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
+    timeZone: TZ,
     year: "numeric",
     month: "2-digit",
-  }).formatToParts(date);
+    day: "2-digit",
+  }).formatToParts(new Date(date));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("year")}-${get("month")}`;
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 function shiftMonth(month: string, delta: number): string {
@@ -34,12 +42,17 @@ function shiftMonth(month: string, delta: number): string {
 
 function shortDate(iso: string): string {
   return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
+    timeZone: TZ,
     month: "numeric",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(iso));
+}
+
+function dayLabel(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return `${d}일 ${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}요일`;
 }
 
 async function safe<T>(job: Promise<T>): Promise<{ data: T | null; failed: boolean }> {
@@ -59,27 +72,93 @@ const MESSAGES: Record<string, { text: string; err?: boolean }> = {
   fail: { text: "저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.", err: true },
 };
 
+const splitOf = (t: TxnRow) => (Array.isArray(t.splits) ? t.splits[0] : t.splits) ?? null;
+
+/** 내 지출로 잡히는 금액. 더치페이는 내 몫만, 입금과 계좌 이동은 0이다. */
+function mySpend(t: TxnRow): number {
+  if (t.direction !== "out" || t.category === "self") return 0;
+  return splitOf(t)?.my_share ?? t.amount;
+}
+
+/** 현재 달이면 오늘, 지난 달이면 말일이 들어 있는 일~토 7일. */
+function weekDays(month: string, today: string): string[] {
+  const [y, m] = month.split("-").map(Number);
+  const focus = today.startsWith(month)
+    ? new Date(`${today}T00:00:00Z`)
+    : new Date(Date.UTC(y, m, 0));
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(focus);
+    d.setUTCDate(focus.getUTCDate() - focus.getUTCDay() + i);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
+function TxnItem({ t }: { t: TxnRow }) {
+  const split = splitOf(t);
+  const incoming = t.direction === "in";
+  const name = t.cp_label ?? "이름 없음";
+  const detail = split
+    ? `더치페이 ${split.n}명 · 총 ${won(split.total)}`
+    : categoryLabel(t.category);
+  return (
+    <li className="txn">
+      <CategoryIcon code={t.category} />
+      <div className="txn-body">
+        <p className={`txn-amount${incoming ? " in" : ""}`}>
+          {incoming ? "+" : "-"}
+          {won(split?.my_share ?? t.amount)}
+        </p>
+        <p className="txn-sub">
+          {name} · {detail}
+          {t.status === "pending" && <span className="chip">확인 필요</span>}
+        </p>
+      </div>
+    </li>
+  );
+}
+
 export default async function Home(props: PageProps<"/">) {
   const params = await props.searchParams;
   const rawMonth = typeof params.month === "string" ? params.month : "";
-  const thisMonth = kstMonth();
+  const today = kstDate();
+  const thisMonth = today.slice(0, 7);
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(rawMonth) ? rawMonth : thisMonth;
   const msgKey = typeof params.msg === "string" ? params.msg : "";
   const msg = MESSAGES[msgKey];
 
-  const [mon, splits, pend, ruleList, setting] = await Promise.all([
+  const [mon, txnList, splits, pend, ruleList, setting] = await Promise.all([
     safe(monthly(month)),
+    safe(monthTransactions(month)),
     safe(openSplits()),
     safe(pending()),
     safe(rules()),
     safe(settings()),
   ]);
 
-  const anyFailed = [mon, splits, pend, ruleList, setting].some((r) => r.failed);
+  const anyFailed = [mon, txnList, splits, pend, ruleList, setting].some((r) => r.failed);
 
   const rows: MonthlyRow[] = [...(mon.data ?? [])].sort((a, b) => b.spent - a.spent);
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
-  const maxSpent = rows[0]?.spent ?? 0;
+  const top = rows[0];
+
+  // 막대와 범례는 같은 항목을 쓴다. 상위 3개 뒤는 "그 외"로 묶는다.
+  const named = rows.length > LEGEND_LIMIT + 1 ? rows.slice(0, LEGEND_LIMIT) : rows;
+  const others = rows.slice(named.length);
+  const othersSpent = others.reduce((s, r) => s + r.spent, 0);
+
+  const txns: TxnRow[] = txnList.data ?? [];
+  const saved = txns.reduce((s, t) => {
+    const split = splitOf(t);
+    return s + (split ? split.total - split.my_share : 0);
+  }, 0);
+
+  const byDay = new Map<string, TxnRow[]>();
+  const spentByDay = new Map<string, number>();
+  for (const t of txns) {
+    const day = kstDate(t.ts);
+    byDay.set(day, [...(byDay.get(day) ?? []), t]);
+    spentByDay.set(day, (spentByDay.get(day) ?? 0) + mySpend(t));
+  }
 
   const splitRows: SplitRow[] = splits.data ?? [];
   const receivable = splitRows.reduce((s, r) => s + r.remaining, 0);
@@ -91,13 +170,15 @@ export default async function Home(props: PageProps<"/">) {
   return (
     <main>
       <header className="top">
-        <h1>바로분류</h1>
         <nav className="month" aria-label="월 이동">
-          <a href={`/?month=${shiftMonth(month, -1)}`}>◀</a>
-          <span>{month}</span>
-          <a href={`/?month=${shiftMonth(month, 1)}`} aria-disabled={month >= thisMonth}>
-            ▶
-          </a>
+          <a href={`/?month=${shiftMonth(month, -1)}`} aria-label="이전 달" className="tri prev" />
+          <span>{Number(month.slice(5))}월</span>
+          <a
+            href={`/?month=${shiftMonth(month, 1)}`}
+            aria-label="다음 달"
+            aria-disabled={month >= thisMonth}
+            className="tri next"
+          />
         </nav>
       </header>
 
@@ -108,98 +189,174 @@ export default async function Home(props: PageProps<"/">) {
         </div>
       )}
 
-      <section>
-        <h2>{month} 순지출</h2>
-        <p className="big">{won(totalSpent)}</p>
-        {rows.length === 0 ? (
-          <p className="empty">이 달에는 아직 기록된 지출이 없어요.</p>
-        ) : (
-          <ul className="bars">
-            {rows.map((r) => (
-              <li key={r.category}>
-                <div className="row">
-                  <span>
-                    {categoryLabel(r.category)} <span className="muted">{r.n}건</span>
-                  </span>
-                  <span>{won(r.spent)}</span>
-                </div>
-                <div className="track">
-                  <div
-                    className="fill"
-                    style={{ width: `${maxSpent ? Math.max(2, (r.spent / maxSpent) * 100) : 0}%` }}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
+      <section className="summary">
+        <div className="totals">
+          <div>
+            <p className="label">지출</p>
+            <p className="value">{totalSpent ? `-${won(totalSpent)}` : "0원"}</p>
+          </div>
+          <div>
+            <p className="label">받을 돈</p>
+            <p className="value">{won(receivable)}</p>
+          </div>
+        </div>
+        {saved > 0 && (
+          <p className="headline">
+            더치페이로 <em>{won(saved)}</em> 덜 쓴 걸로 잡았어요
+          </p>
         )}
-        <p className="muted" style={{ marginTop: 12 }}>
-          엔빵은 내 몫만 포함하고, 계좌 이동과 입금은 뺀 금액이에요.
-        </p>
       </section>
 
-      <section>
-        <h2>받을 돈</h2>
-        {splitRows.length === 0 ? (
-          <p className="empty">받을 돈이 없어요.</p>
+      <section className="plain">
+        <p className="label">소비 분석</p>
+        {!top ? (
+          <p className="empty">이 달에는 아직 기록된 지출이 없어요.</p>
         ) : (
           <>
-            <ul className="list">
-              {splitRows.map((s) => (
-                <li key={s.id}>
-                  <span className="name">
-                    {s.transactions?.cp_label ?? "이름 없음"}{" "}
-                    <span className="muted">
-                      총 {won(s.total)} · {s.n}명
-                    </span>
+            <h2 className="title">
+              <em>{categoryLabel(top.category)}</em>에 가장 많은 돈을 썼어요
+            </h2>
+            <div className="stack" role="img" aria-label="카테고리별 지출 비율. 금액은 아래 목록에 있어요.">
+              {named.map((r) => (
+                <span
+                  key={r.category}
+                  className={`seg cat-${r.category}`}
+                  style={{ flexGrow: r.spent }}
+                  title={`${categoryLabel(r.category)} ${won(r.spent)}`}
+                />
+              ))}
+              {othersSpent > 0 && (
+                <span
+                  className="seg neutral"
+                  style={{ flexGrow: othersSpent }}
+                  title={`그 외 ${others.length}개 ${won(othersSpent)}`}
+                />
+              )}
+            </div>
+            <ul className="legend">
+              {named.map((r) => (
+                <li key={r.category}>
+                  <span className="who">
+                    <span className={`dot cat-${r.category}`} />
+                    {categoryLabel(r.category)}
                   </span>
-                  <span className="amount">{won(s.remaining)}</span>
+                  <span className="amt">{won(r.spent)}</span>
                 </li>
               ))}
+              {othersSpent > 0 && (
+                <li>
+                  <span className="who">
+                    <span className="dot neutral" />그 외 {others.length}개
+                  </span>
+                  <span className="amt">{won(othersSpent)}</span>
+                </li>
+              )}
             </ul>
-            <div className="sum">
-              <span>합계</span>
-              <span>{won(receivable)}</span>
-            </div>
+            <p className="note">더치페이는 내 몫만 넣고, 계좌 이동과 입금은 뺀 금액이에요.</p>
           </>
         )}
       </section>
 
-      <section>
-        <h2>미분류 (최근 20건)</h2>
-        {pendRows.length === 0 ? (
-          <p className="empty">분류를 기다리는 거래가 없어요.</p>
-        ) : (
-          <ul className="list">
+      {pendRows.length > 0 && (
+        <section className="plain">
+          <p className="label">확인이 필요해요</p>
+          <h2 className="title">
+            <em>{pendRows.length}건</em>이 답을 기다려요
+          </h2>
+          <ul className="rows">
             {pendRows.map((t) => (
               <li key={t.id}>
-                <span className="name">
-                  {t.cp_label ?? "이름 없음"} <span className="muted">{shortDate(t.ts)}</span>
+                <span>
+                  {t.cp_label ?? "이름 없음"}
+                  <small>{shortDate(t.ts)}</small>
                 </span>
-                <span className="amount">
-                  {t.direction === "in" ? "+" : ""}
+                <span className="amt">
+                  {t.direction === "in" ? "+" : "-"}
                   {won(t.amount)}
                 </span>
               </li>
             ))}
           </ul>
+          <p className="note">텔레그램에서 답장하면 분류돼요.</p>
+        </section>
+      )}
+
+      <section className="plain">
+        <p className="label">더치페이</p>
+        {splitRows.length === 0 ? (
+          <p className="empty">받을 돈이 없어요.</p>
+        ) : (
+          <>
+            <h2 className="title">
+              <em>{won(receivable)}</em>을 더 받아야 해요
+            </h2>
+            <ul className="rows">
+              {splitRows.map((s) => (
+                <li key={s.id}>
+                  <span>
+                    {s.transactions?.cp_label ?? "이름 없음"}
+                    <small>
+                      총 {won(s.total)} · {s.n}명
+                    </small>
+                  </span>
+                  <span className="amt">{won(s.remaining)}</span>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
-        <p className="muted" style={{ marginTop: 12 }}>
-          텔레그램에서 답장하면 분류돼요.
-        </p>
       </section>
 
-      <section>
-        <h2>학습된 규칙</h2>
+      <section className="plain history">
+        <div className="week" aria-label="이번 주 일별 지출">
+          {weekDays(month, today).map((d) => {
+            const spent = d.startsWith(month) ? (spentByDay.get(d) ?? 0) : 0;
+            const num = Number(d.slice(8));
+            const weekday = new Date(`${d}T00:00:00Z`).getUTCDay();
+            return (
+              <div key={d} className={`day${d === today ? " on" : ""}${d > today ? " later" : ""}`}>
+                <div className="cell">
+                  <span className="wd">{WEEKDAYS[weekday]}</span>
+                  <span className="num">{num}</span>
+                </div>
+                <span className="daily">{spent ? `-${spent.toLocaleString("ko-KR")}` : ""}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {txns.length === 0 ? (
+          <p className="empty">이 달의 내역이 없어요.</p>
+        ) : (
+          [...byDay.entries()].map(([day, list]) => (
+            <div key={day}>
+              <h3 className="date">{dayLabel(day)}</h3>
+              <ul className="txns">
+                {list.map((t) => (
+                  <TxnItem key={t.id} t={t} />
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+        {txns.length >= 100 && <p className="note">최근 100건까지 보여줘요.</p>}
+      </section>
+
+      <details className="fold">
+        <summary>
+          학습된 규칙 <span className="count">{ruleRows.length}개</span>
+        </summary>
         {ruleRows.length === 0 ? (
           <p className="empty">아직 학습된 규칙이 없어요.</p>
         ) : (
-          <ul className="list">
+          <ul className="rows">
             {ruleRows.map((r) => (
               <li key={r.id}>
-                <span className="name">
-                  {r.counterparties?.alias ?? r.cp_key.replace(/^m:/, "")} →{" "}
-                  {categoryLabel(r.category)} <span className="muted">{r.hits}회</span>
+                <span>
+                  {r.counterparties?.alias ?? r.cp_key.replace(/^m:/, "")}
+                  <small>
+                    {categoryLabel(r.category)} · {r.hits}회
+                  </small>
                 </span>
                 <form action={removeRule}>
                   <input type="hidden" name="id" value={r.id} />
@@ -211,10 +368,10 @@ export default async function Home(props: PageProps<"/">) {
             ))}
           </ul>
         )}
-      </section>
+      </details>
 
-      <section>
-        <h2>설정</h2>
+      <details className="fold">
+        <summary>설정</summary>
         <form action={saveSettings} className="settings">
           <label>
             확신 기준 (0~1)
@@ -254,7 +411,7 @@ export default async function Home(props: PageProps<"/">) {
             />
           </label>
           <label>
-            엔빵 의심 최소 금액 (원)
+            더치페이 의심 최소 금액 (원)
             <input
               type="number"
               name="split_suspect_min"
@@ -266,7 +423,7 @@ export default async function Home(props: PageProps<"/">) {
           </label>
           <button type="submit">저장</button>
         </form>
-      </section>
+      </details>
 
       <footer>장소 분류 데이터: Kakao Local API</footer>
     </main>

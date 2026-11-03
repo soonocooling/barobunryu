@@ -75,7 +75,7 @@ class PollingFlow(unittest.TestCase):
             watch.ask_pending({}, state, t)
         send.assert_called_once()
         buttons = send.call_args.args[1]
-        self.assertEqual(buttons[0], [("엔빵", "c:1:split")])  # 3만원 이상 식비는 엔빵 의심
+        self.assertEqual(buttons[0], [("더치페이", "c:1:split")])  # 3만원 이상 식비는 더치페이 의심
         self.assertIn(("식비", "c:1:food"), buttons[1])
         self.assertEqual(fake.update.call_args.args[2]["tg_message_id"], 99)
         self.assertEqual(state["asked_today"]["count"], 1)

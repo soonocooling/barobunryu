@@ -161,7 +161,7 @@ def test_scenario2_split_suspect_asks_once(world):
     assert txn["asked_at"] and txn["tg_message_id"] == question["id"]
     assert len(world.bot.sent) == 1
     assert question["text"].startswith("[확인] 10/27 12:00 · 교촌치킨 46,000원 출금. 뭐였어?")
-    assert question["buttons"][0] == [("엔빵", f"c:{txn['id']}:split")]
+    assert question["buttons"][0] == [("더치페이", f"c:{txn['id']}:split")]
 
 
 def test_scenario3_reply_creates_split(world):
@@ -173,7 +173,7 @@ def test_scenario3_reply_creates_split(world):
     assert world.txns()[0]["status"] == "confirmed"
     edit = world.bot.edits[-1]
     assert edit["id"] == question["id"] and edit["buttons"] is None
-    assert edit["text"] == "✅ 식비 · 4명 엔빵 (내 몫 11,500원, 받을 돈 34,500원)"
+    assert edit["text"] == "✅ 식비 · 4명 더치페이 (내 몫 11,500원, 받을 돈 34,500원)"
 
 
 def test_scenario4_never_asks_twice(world):
@@ -459,15 +459,15 @@ def test_demo_scenario_with_real_modules(monkeypatch, tmp_path):
     world.run()
     assert (world.txns()[0]["category"], world.txns()[0]["status"]) == ("cafe", "auto")
     assert world.bot.sent == []
-    # 2~3. 엔빵 의심 질문 → 답장
+    # 2~3. 더치페이 의심 질문 → 답장
     world.say("46000 교촌치킨")
     world.run()
     chicken = world.txns()[1]
     assert (chicken["category"], chicken["status"]) == ("food", "pending")
-    assert world.bot.sent[-1]["buttons"][0] == [("엔빵", f"c:{chicken['id']}:split")]
+    assert world.bot.sent[-1]["buttons"][0] == [("더치페이", f"c:{chicken['id']}:split")]
     world.say("4명", reply_to=chicken["tg_message_id"])
     world.run()
-    assert world.bot.edits[-1]["text"] == "✅ 식비 · 4명 엔빵 (내 몫 11,500원, 받을 돈 34,500원)"
+    assert world.bot.edits[-1]["text"] == "✅ 식비 · 4명 더치페이 (내 몫 11,500원, 받을 돈 34,500원)"
     # 4~5. 이체 질문 → 버튼 → 규칙 학습
     world.say("50000 상대A 이체")
     world.run()

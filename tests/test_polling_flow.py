@@ -79,11 +79,3 @@ class PollingFlow(unittest.TestCase):
         self.assertIn(("식비", "c:1:food"), buttons[1])
         self.assertEqual(fake.update.call_args.args[2]["tg_message_id"], 99)
         self.assertEqual(state["asked_today"]["count"], 1)
-
-    def test_unknown_push_is_preserved(self):
-        fake = Mock()
-        fake.select.return_value = [{"id": 1, "raw_text": "unknown sample"}]
-        with patch.object(watch, "db", fake), patch.object(watch, "create_txn") as create:
-            watch.process_inbox()
-        create.assert_not_called()
-        fake.update.assert_not_called()

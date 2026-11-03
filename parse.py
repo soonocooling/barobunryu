@@ -4,13 +4,75 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import config
 
-# ---------------------------------------------------------------- 공통
 
-_TRANSFER_WORDS = {"이체", "송금", "보냄", "계좌"}
+# ---------------------------------------------------------------- 직접 입력·답장
 
+def _amount(token: str) -> int | None:
+    if re.fullmatch(r"\+?[\d,]+원?", token):
+        digits = token.lstrip("+").removesuffix("원").replace(",", "")
+        return int(digits) if digits else None
+    match = re.fullmatch(r"\+?(\d+(?:\.\d+)?)만(?:(\d+)천)?원?", token)
+    if match:
+        return int(Decimal(match[1]) * 10000 + int(match[2] or 0) * 1000)
+    match = re.fullmatch(r"\+?(\d+)천원?", token)
+    return int(match[1]) * 1000 if match else None
+
+
+def parse_manual(text: str) -> dict | None:
+    """텔레그램 직접 입력 → Txn. 예: "스벅 6500", "+11500 세훈", "50000 홍길동 이체"."""
+    if text.strip().startswith("/"):
+        return None
+    tokens = text.split()
+    amounts = [(i, _amount(token)) for i, token in enumerate(tokens) if _amount(token) is not None]
+    if len(amounts) != 1 or amounts[0][1] <= 0:
+        return None
+    index, amount = amounts[0]
+    transfer_words = {"이체", "송금", "보냄", "계좌"}
+    direction = "in" if tokens[index].startswith("+") else "out"
+    method = "transfer" if direction == "in" or transfer_words.intersection(tokens) else "card"
+    name = " ".join(token for i, token in enumerate(tokens) if i != index and token not in transfer_words)
+    if not name:
+        return None
+    return {"ts": config.now().isoformat(timespec="seconds"), "amount": amount,
+            "direction": direction, "method": method, "counterparty": name}
+
+
+def parse_answer(text: str) -> dict:
+    """질문에 대한 답장 → Answer."""
+    answer = {"category": None, "split_n": None, "my_share": None,
+              "my_share_of_other": False, "skip": False}
+    text = text.lower()
+    if any(word.lower() in text for word in config.keywords().get("skip_words", [])):
+        return {**answer, "skip": True, "category": "etc"}
+    # 숫자와 인원 접미사 또는 엔빵 뒤 숫자를 잡는다.
+    match = re.search(r"(\d+)\s*(?:명|빵|인)|엔빵\s*(\d+)", text)
+    if match:
+        n = int(match[1] or match[2])
+        if 2 <= n <= 20:
+            answer["split_n"] = n
+    # "내 몫 4명"의 4를 내 몫 금액으로 읽지 않는다.
+    match = re.search(r"(?:내\s*몫|내꺼)\s*([\d,]*\d)(?!\s*(?:명|빵|인))", text)
+    if match:
+        answer["my_share"] = int(match[1].replace(",", ""))
+    elif re.search(r"내\s*몫|내꺼", text):
+        answer["my_share_of_other"] = True
+    # "엔빵 3", "3빵"의 '빵'이 카페·간식 키워드(빵)로 잡히지 않게 엔빵 표현은 빼고 찾는다.
+    rest = re.sub(r"엔빵\s*\d*|n빵|\d+\s*(?:명|빵|인)", " ", text)
+    best = 0
+    for code, category in config.categories().items():
+        if category.get("ask", True) is False and code not in {"self", "income"}:
+            continue
+        for word in [category["label"], *category.get("keywords", [])]:
+            if word.lower() in rest and len(word) > best:
+                best, answer["category"] = len(word), code
+    return answer
+
+
+# ---------------------------------------------------------------- 알림 원문
 
 def _to_int(digits: str) -> int:
     return int(digits.replace(",", ""))
@@ -34,108 +96,6 @@ def _txn(ts: str, amount: int, direction: str, method: str, counterparty: str | 
 def _now_iso() -> str:
     return config.now().isoformat(timespec="seconds")
 
-
-# ---------------------------------------------------------------- parse_manual
-
-_AMOUNT_PLAIN = re.compile(r"^\+?(\d[\d,]*)원?$")
-_AMOUNT_MAN = re.compile(r"^\+?(\d+(?:\.\d+)?)만(?:(\d+)천)?원?$")
-_AMOUNT_CHEON = re.compile(r"^\+?(\d+)천원?$")
-
-
-def _amount_of(token: str) -> int | None:
-    m = _AMOUNT_PLAIN.match(token)
-    if m:
-        return _to_int(m.group(1))
-    m = _AMOUNT_MAN.match(token)
-    if m:
-        return int(round(float(m.group(1)) * 10000)) + int(m.group(2) or 0) * 1000
-    m = _AMOUNT_CHEON.match(token)
-    if m:
-        return int(m.group(1)) * 1000
-    return None
-
-
-def parse_manual(text: str) -> dict | None:
-    """텔레그램 직접 입력 → Txn. 예: "스벅 6500", "+11500 세훈", "50000 홍길동 이체"."""
-    text = (text or "").strip()
-    if not text or text.startswith("/"):
-        return None
-    tokens = text.split()
-    amount_idx = [i for i, t in enumerate(tokens) if _amount_of(t) is not None]
-    if len(amount_idx) != 1:
-        return None
-    i = amount_idx[0]
-    amount = _amount_of(tokens[i])
-    if not amount:
-        return None
-    direction = "in" if tokens[i].startswith("+") else "out"
-    rest = [t for j, t in enumerate(tokens) if j != i]
-    is_transfer = any(t in _TRANSFER_WORDS for t in rest)
-    rest = [t for t in rest if t not in _TRANSFER_WORDS]
-    method = "transfer" if (is_transfer or direction == "in") else "card"
-    counterparty = " ".join(rest) or None
-    return {"ts": _now_iso(), "amount": amount, "direction": direction,
-            "method": method, "counterparty": counterparty}
-
-
-# ---------------------------------------------------------------- parse_answer
-
-_SPLIT_PATTERNS = (
-    re.compile(r"(\d+)\s*(?:명|빵|인)"),
-    re.compile(r"엔빵\s*(\d+)"),
-)
-_SHARE_NUM = re.compile(r"(?:내\s*몫|내꺼)\s*([\d,]*\d)(?!\s*(?:명|빵|인))")
-_SHARE_WORD = re.compile(r"내\s*몫|내꺼")
-
-
-def _find_split(text: str) -> int | None:
-    for pat in _SPLIT_PATTERNS:
-        m = pat.search(text)
-        if m:
-            n = int(m.group(1))
-            if 2 <= n <= 20:
-                return n
-    return None
-
-
-def _find_category(text_lower: str) -> str | None:
-    best_len, best_code = 0, None
-    for code, cat in config.categories().items():
-        if cat.get("ask", True) is False and code not in ("self", "income"):
-            continue
-        for word in [cat.get("label", "")] + list(cat.get("keywords", [])):
-            w = word.lower()
-            if w and w in text_lower and len(w) > best_len:
-                best_len, best_code = len(w), code
-    return best_code
-
-
-def parse_answer(text: str) -> dict:
-    """질문에 대한 답장 → Answer."""
-    ans = {"category": None, "split_n": None, "my_share": None,
-           "my_share_of_other": False, "skip": False}
-    text = (text or "").strip()
-    if not text:
-        return ans
-    lower = text.lower()
-    skip_words = config.keywords().get("skip_words", [])
-    if any(w.lower() in lower for w in skip_words):
-        ans["skip"] = True
-        ans["category"] = "etc"
-        return ans
-    ans["split_n"] = _find_split(text)
-    m = _SHARE_NUM.search(text)
-    if m:
-        ans["my_share"] = _to_int(m.group(1))
-    elif _SHARE_WORD.search(text):
-        ans["my_share_of_other"] = True
-    # "엔빵 3", "3빵"의 '빵'이 카페·간식 키워드(빵)로 잡히지 않게 엔빵 표현은 빼고 찾는다
-    rest = re.sub(r"엔빵\s*\d*|n빵|\d+\s*(?:명|빵|인)", " ", lower)
-    ans["category"] = _find_category(rest)
-    return ans
-
-
-# ---------------------------------------------------------------- parse_push
 
 _AMT = r"([\d,]*\d)\s*원"
 _DT_FULL = re.compile(r"(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?(?:\([가-힣]\))?\s*(\d{1,2}):(\d{2})")

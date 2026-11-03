@@ -26,7 +26,6 @@ SAMPLES = json.loads(
     ("1.5만 커피", 15000, "out", "card", "커피"),
     ("3만원 택시", 30000, "out", "card", "택시"),
     ("6천 간식", 6000, "out", "card", "간식"),
-    ("10000", 10000, "out", "card", None),
 ])
 def test_parse_manual_ok(text, amount, direction, method, counterparty):
     t = parse.parse_manual(text)
@@ -36,7 +35,10 @@ def test_parse_manual_ok(text, amount, direction, method, counterparty):
     assert t["ts"].endswith("+09:00")
 
 
-@pytest.mark.parametrize("text", ["안녕", "100 200 가게", "", "   ", "/start", "/help 1000", "0 가게"])
+@pytest.mark.parametrize("text", [
+    "안녕", "100 200 가게", "", "   ", "/start", "/help 1000", "0 가게",
+    "10000",  # 상대 이름이 없으면 거래로 만들 수 없다(watch.py의 cp_key 처리와 맞춤)
+])
 def test_parse_manual_none(text):
     assert parse.parse_manual(text) is None
 

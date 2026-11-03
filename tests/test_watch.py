@@ -298,6 +298,13 @@ def test_inbox_success_clears_raw_and_dedupes(world):
     assert [(r["raw_text"], r["status"]) for r in world.db.rows("inbox")] == [(None, "done")] * 2
 
 
+def test_inbox_keeps_opposite_direction_with_same_amount_and_counterparty(world):
+    world.db.insert("inbox", {"raw_text": "10000 상대A 이체", "status": "new"})
+    world.db.insert("inbox", {"raw_text": "+10000 상대A", "status": "new"})
+    world.run()
+    assert [t["direction"] for t in world.txns()] == ["out", "in"]
+
+
 def test_split_button_then_reply(world):
     question = chicken_question(world)
     txn = world.txns()[0]

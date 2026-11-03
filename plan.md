@@ -36,7 +36,8 @@
 | 정산 | 토스에 없음. 카카오페이 정산 알림톡 | 우리 규칙으로 엔빵 건과 매칭 |
 
 ### 기술스택 (Wappalyzer)
-- 폰 앱이라 직접 확인할 수 없다. 대신 공개 웹사이트 toss.im을 Wappalyzer로 캡처한다 → `docs/stack.png` (**아직 없음**)
+- 폰 앱이라 직접 확인할 수 없다. 대신 공개 웹사이트 toss.im을 Wappalyzer로 캡처한다 → `docs/stack.png`, `docs/stack-2.png` (2장으로 나눠 캡처)
+- 확인된 스택: Next.js 15.5.27(React, 정적 사이트 생성기, 웹 프레임워크), Lenis, Framer Motion, Sentry, Open Graph, Envoy(리버스 프록시), Nginx(웹 서버), Priority Hints. 캡처에 주소창이 없어 사이트 이름은 캡처만으로 확인되지 않는다.
 
 ### 추정 테이블 (원본이 가지고 있을 것)
 - transactions: id, user_id, occurred_at, amount, direction, counterparty, category_id, memo, include_in_total, hidden, created_at  ← 상세 화면의 메모·지출 합계 포함·숨기기 반영

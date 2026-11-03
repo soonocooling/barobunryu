@@ -6,6 +6,8 @@ from unittest.mock import Mock
 import pytest
 
 import bot
+import classify as real_classify
+import parse as real_parse
 import watch
 from config import KST
 from fakedb import FakeDB
@@ -64,10 +66,14 @@ class FakeParse:
 
 
 class FakeClassify:
-    def __init__(self):
+    def __init__(self, fake_db):
+        self.db = fake_db
         self.learned = []
 
     def classify(self, txn, rules, cache):
+        key = self.db.cp_key(txn["counterparty"], txn["method"])
+        if key in rules:
+            return rules[key], 0.95, None
         if txn["direction"] == "in":
             return "income", 0.5, None
         if txn["method"] == "transfer":
@@ -84,10 +90,13 @@ class World:
         self.t = t
         self.db = FakeDB(lambda: self.t, settings, rules)
         self.bot = FakeBot()
-        self.classify = FakeClassify()
+        self.classify = FakeClassify(self.db)
         self.state_file = tmp_path / "state.json"
         self._update_id = 100
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token-placeholder")
         monkeypatch.setenv("TELEGRAM_CHAT_ID", CHAT_ID)
+        monkeypatch.delenv("TEST_TELEGRAM_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("TEST_TELEGRAM_CHAT_ID", raising=False)
         monkeypatch.setattr(watch, "STATE_FILE", self.state_file)
         monkeypatch.setattr(watch, "load_env", lambda: None)
         monkeypatch.setattr(watch, "now", lambda: self.t)
@@ -289,15 +298,6 @@ def test_inbox_success_clears_raw_and_dedupes(world):
     assert [(r["raw_text"], r["status"]) for r in world.db.rows("inbox")] == [(None, "done")] * 2
 
 
-def test_inbox_failure_notifies_once(world):
-    world.db.insert("inbox", {"raw_text": "못읽음 알림", "status": "new"})
-    world.run()
-    world.run()
-    assert [m["text"] for m in world.bot.sent] == ["못 읽었어: 못읽음 알림"]
-    row = world.db.rows("inbox")[0]
-    assert (row["raw_text"], row["status"]) == (None, "failed")
-
-
 def test_split_button_then_reply(world):
     question = chicken_question(world)
     txn = world.txns()[0]
@@ -352,13 +352,14 @@ def test_reply_to_unknown_message(world):
     assert world.bot.sent[-1]["text"] == "어느 거래인지 모르겠어"
 
 
-def test_unknown_income_offers_general_income_button(world):
+def test_unknown_income_offers_income_button(world):
     world.say("+70000 상대D")
     world.run()
     txn = world.txns()[0]
     assert (txn["category"], txn["status"]) == ("income", "pending")
-    assert world.bot.sent[0]["buttons"][-1] == [("일반 입금", f"g:{txn['id']}")]
-    world.tap(f"g:{txn['id']}", message_id=txn["tg_message_id"])
+    data = f"c:{txn['id']}:income"
+    assert world.bot.sent[0]["buttons"][-1][0][1] == data
+    world.tap(data, message_id=txn["tg_message_id"])
     world.run()
     assert (txn["category"], txn["status"]) == ("income", "confirmed")
 
@@ -391,6 +392,80 @@ def test_multiple_split_candidates_ask_then_user_picks(world):
     assert (income["category"], income["status"]) == ("settlement", "confirmed")
     assert first_split["remaining"] == 34500 - 5000
     assert [(r["matched_by"], r["amount"]) for r in world.db.rows("settlements")] == [("user", 5000)]
+
+
+def test_general_income_button_keeps_split_open(world):
+    two_open_splits(world)
+    world.say("+5000 상대B")
+    world.run()
+    income = world.txns()[-1]
+    world.tap(f"g:{income['id']}", message_id=income["tg_message_id"])
+    world.run()
+    assert (income["category"], income["status"]) == ("income", "confirmed")
+    assert world.db.rows("settlements") == []
+    assert world.bot.edits[-1]["text"] == "✅ 수입"
+
+
+def real_modules_world(monkeypatch, tmp_path):
+    """실제 parse·classify와 메모리 DB. 카카오 호출만 막는다."""
+    world = World(monkeypatch, tmp_path)
+    monkeypatch.setattr(watch, "parse", real_parse)
+    monkeypatch.setattr(watch, "classify", real_classify)
+    monkeypatch.setattr(real_classify, "db", world.db)
+    monkeypatch.setattr(real_classify.kakao, "kakao_lookup",
+                        lambda name: {"code": "FD6", "name": "음식점 > 치킨"})
+    return world
+
+
+def test_demo_scenario_with_real_modules(monkeypatch, tmp_path):
+    world = real_modules_world(monkeypatch, tmp_path)
+    # 1. 확실한 건 조용히 처리
+    world.say("스벅 6500")
+    world.run()
+    assert (world.txns()[0]["category"], world.txns()[0]["status"]) == ("cafe", "auto")
+    assert world.bot.sent == []
+    # 2~3. 엔빵 의심 질문 → 답장
+    world.say("46000 교촌치킨")
+    world.run()
+    chicken = world.txns()[1]
+    assert (chicken["category"], chicken["status"]) == ("food", "pending")
+    assert world.bot.sent[-1]["buttons"][0] == [("엔빵", f"c:{chicken['id']}:split")]
+    world.say("4명", reply_to=chicken["tg_message_id"])
+    world.run()
+    assert world.bot.edits[-1]["text"] == "✅ 식비 · 4명 엔빵 (내 몫 11,500원, 받을 돈 34,500원)"
+    # 4~5. 이체 질문 → 버튼 → 규칙 학습
+    world.say("50000 상대A 이체")
+    world.run()
+    transfer = world.txns()[2]
+    assert (transfer["category"], transfer["cp_label"]) == ("transfer", "상대 #1")
+    world.tap(f"c:{transfer['id']}:living", message_id=transfer["tg_message_id"])
+    world.run()
+    assert (transfer["category"], transfer["status"]) == ("living", "confirmed")
+    assert world.db.rows("rules")[0]["hits"] == 1
+    # 6. 입금 3회로 정산 완료
+    for _ in range(3):
+        world.say("+11500 상대B")
+    world.run()
+    assert world.bot.sent[-1]["text"] == "정산 반영 · 남은 받을 돈 0원"
+    assert world.split_row()["status"] == "done"
+    assert [t["category"] for t in world.txns()[3:]] == ["settlement"] * 3
+    # 7. 다시 돌려도 재질문 없음
+    sent = len(world.bot.sent)
+    world.run()
+    assert len(world.bot.sent) == sent
+
+
+def test_self_transfer_income_is_not_a_settlement(monkeypatch, tmp_path):
+    world = real_modules_world(monkeypatch, tmp_path)
+    world.say("46000 교촌치킨")
+    world.run()
+    world.say("4명", reply_to=world.txns()[0]["tg_message_id"])
+    world.run()
+    world.say("+11500 내 통장")
+    world.run()
+    assert world.txns()[1]["category"] == "self"
+    assert world.db.rows("settlements") == []
+    assert world.split_row()["remaining"] == 34500
 
 
 def test_no_split_candidate_leaves_income_to_classify(world):

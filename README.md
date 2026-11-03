@@ -38,7 +38,9 @@ Actions 운영 설정, 선택적인 로컬 설정, Codespaces 실행 방법은
 - `docs/collab-plan.md` — 협업 계획, 인터페이스 계약
 
 ## 대시보드
-(dashboard 파트 완료 후 배포 URL과 로컬 실행 방법을 추가한다)
+배포 URL: https://barobunryu.vercel.app/ (비밀번호 보호)
+
+로컬 실행: `dashboard/.env.local.example`을 `dashboard/.env.local`로 복사해 값을 채운 뒤 `cd dashboard && npm ci && npm run dev`
 
 ---
 장소 분류 데이터: Kakao Local API

@@ -87,6 +87,7 @@
 - 적는 값: `tg_offset`(마지막으로 처리한 텔레그램 update_id + 1), `last_digest_date`
 
 ## 설정 화면 (배포 URL)
+- 배포 URL: https://barobunryu.vercel.app/ (비밀번호 보호)
 - 화면 1장 (Vercel, 비밀번호 보호): 이번 달 순지출·카테고리 합계, 받을 돈 목록, 미분류 목록, 설정(신뢰도 기준·하루 질문 상한·묶음 시각)
 
 ## 비틀기

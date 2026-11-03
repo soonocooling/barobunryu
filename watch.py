@@ -1,16 +1,16 @@
 """5분마다 GitHub Actions가 실행하는 본체. 담당: 권순오. 절차: tasks/bot.md
-테스트 봇으로 한 번 수신하고 분류 질문과 답변을 처리한다."""
+입력 수신 → 거래 생성·분류 → 애매한 것만 질문 → 답장·버튼으로 확정 → 엔빵·정산."""
 from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta
 from math import ceil
 
 import bot
 import db
 import classify
 import parse
-from datetime import datetime
 from config import KST, ROOT, categories, env, label, load_env, now
 
 STATE_FILE = ROOT / "state.json"
@@ -25,16 +25,7 @@ def handle_update(update: dict) -> None:
         return
     if callback:
         try:
-            parts = callback.get("data", "").split(":")
-            if len(parts) != 3 or parts[0] != "c" or not parts[1].isdigit():
-                return
-            rows = db.select("transactions", id=int(parts[1]), tg_message_id=message["message_id"])
-            if not rows:
-                return
-            if parts[2] == "split":
-                bot.edit(message["message_id"], "몇 명이서? 이 메시지에 답장해줘 (예: 4명)")
-            elif parts[2] in categories():
-                apply_answer(rows[0], {"category": parts[2]})
+            _handle_callback(callback.get("data", ""), message["message_id"])
         finally:
             bot.answer_callback(callback["id"])
         return
@@ -42,7 +33,11 @@ def handle_update(update: dict) -> None:
     if not text:
         return
     command = text.split()[0].split("@")[0]
-    if command in {"/start", "/help"}:
+    if command == "/today":
+        bot.send(today_summary())
+    elif command == "/month":
+        bot.send(month_summary())
+    elif command in {"/start", "/help"}:
         bot.send(USAGE)
     elif message.get("reply_to_message"):
         rows = db.select("transactions", tg_message_id=message["reply_to_message"]["message_id"])
@@ -64,7 +59,39 @@ def handle_update(update: dict) -> None:
         create_txn(txn, source="tg")
 
 
-def create_txn(txn: dict, source: str = "tg") -> dict:
+def _handle_callback(data: str, message_id: int) -> None:
+    """버튼 응답. 해당 메시지에 묶인 거래만 처리해 오래된 콜백을 막는다."""
+    kind, *args = data.split(":")
+    if not args or not args[0].isdigit():
+        return
+    if kind == "c" and len(args) == 2:
+        rows = db.select("transactions", id=int(args[0]), tg_message_id=message_id)
+        if rows and args[1] == "split":
+            bot.edit(message_id, "몇 명이서? 이 메시지에 답장해줘 (예: 4명)")
+        elif rows and args[1] in categories():
+            apply_answer(rows[0], {"category": args[1]})
+    elif kind == "s" and len(args) == 2 and args[1].isdigit():
+        rows = db.select("transactions", id=int(args[1]), tg_message_id=message_id)
+        splits = db.select("splits", id=int(args[0]), status="open")
+        if rows and splits and rows[0]["status"] != "confirmed":
+            remaining = _settle(splits[0], rows[0], "user")
+            bot.edit(message_id, f"✅ 정산 반영 · 남은 받을 돈 {remaining:,}원")
+    elif kind == "g" and len(args) == 1:
+        rows = db.select("transactions", id=int(args[0]), tg_message_id=message_id)
+        if rows and rows[0]["status"] != "confirmed":
+            db.update("transactions", {"id": rows[0]["id"]}, {"category": "income", "status": "confirmed"})
+            bot.edit(message_id, f"✅ {label('income')}")
+
+
+def _is_duplicate(txn: dict, key: str) -> bool:
+    ts = datetime.fromisoformat(txn["ts"])
+    window = timedelta(minutes=2)
+    rows = db.select("transactions", amount=txn["amount"], cp_key=key,
+                     ts=("gte", (ts - window).isoformat(timespec="seconds")))
+    return any(datetime.fromisoformat(row["ts"]) <= ts + window for row in rows)
+
+
+def create_txn(txn: dict, source: str = "tg") -> dict | None:
     """파싱 직후 원문 counterparty가 메모리에 있을 때 호출한다.
 
     원문은 분류에만 전달하고, 이체 상대 실명은 DB에 저장하지 않는다.
@@ -73,6 +100,9 @@ def create_txn(txn: dict, source: str = "tg") -> dict:
     name = txn["counterparty"]
     method = txn["method"]
     key = db.cp_key(name, method)
+    # 같은 알림이 두 번 오는 경우만 막는다. 직접 입력은 사람이 일부러 보낸 것이다(엔빵 입금 ×3).
+    if source == "auto" and _is_duplicate(txn, key):
+        return None
     parties = db.select("counterparties", cp_key=key)
     if parties:
         party = parties[0]
@@ -92,12 +122,16 @@ def create_txn(txn: dict, source: str = "tg") -> dict:
         db.upsert("merchant_cache", {k: cache_row[k] for k in columns if k in cache_row},
                   on_conflict="name")
     settings = db.get_settings()
-    return db.insert("transactions", {
+    row = db.insert("transactions", {
         "ts": txn["ts"], "amount": txn["amount"],
         "direction": txn["direction"], "method": method,
         "cp_key": key, "cp_label": party.get("alias") if method == "transfer" else name,
         **_classification_values(txn, category, confidence, settings), "source": source,
     })
+    # 내 계좌끼리 옮긴 돈은 정산이 아니다.
+    if row["direction"] == "in" and row["category"] != "self":
+        match_income(row)
+    return row
 
 
 def confirm_category(txn: dict, category: str) -> None:
@@ -110,10 +144,14 @@ def confirm_category(txn: dict, category: str) -> None:
     classify.learn(txn["cp_key"], category)
 
 
+def _is_split_suspect(txn: dict, category: str | None, settings: dict) -> bool:
+    return (txn["direction"] == "out" and category in {"food", "cafe", "culture"}
+            and txn["amount"] >= int(settings.get("split_suspect_min", 30000)))
+
+
 def _classification_values(txn: dict, category: str, confidence: float, settings: dict) -> dict:
-    pending = confidence < float(settings.get("threshold", 0.7))
-    pending |= (txn["direction"] == "out" and category in {"food", "cafe", "culture"}
-                and txn["amount"] >= int(settings.get("split_suspect_min", 30000)))
+    pending = (confidence < float(settings.get("threshold", 0.7))
+               or _is_split_suspect(txn, category, settings))
     return {"category": category, "confidence": confidence,
             "status": "pending" if pending else "auto"}
 
@@ -190,16 +228,66 @@ def apply_answer(txn: dict, ans: dict) -> None:
     if (category in (None, "transfer", "etc") and not ans.get("category")
             and not ans.get("skip") and not wants_split):
         if txn.get("tg_message_id"):
-            bot.edit(txn["tg_message_id"], "카테고리를 못 알아들었어. 카테고리를 다시 답장해줘", _buttons(txn))
+            bot.edit(txn["tg_message_id"], "카테고리를 못 알아들었어. 카테고리를 다시 답장해줘",
+                     _buttons(txn, db.get_settings()))
         return
     if category not in categories():
         raise ValueError("알 수 없는 카테고리")
     if txn.get("status") != "confirmed" or txn.get("category") != category:
         confirm_category(txn, category)
     if txn.get("tg_message_id"):
-        suffix = (f" · {split['n']}명 엔빵 (남은 받을 돈 {split['remaining']:,}원)"
+        suffix = (f" · {split['n']}명 엔빵 (내 몫 {split['my_share']:,}원, 받을 돈 {split['remaining']:,}원)"
                   if split else "")
         bot.edit(txn["tg_message_id"], f"✅ {label(category)}{suffix}")
+
+
+def _settle(split: dict, txn: dict, matched_by: str) -> int:
+    db.insert("settlements", {"split_id": split["id"], "txn_id": txn["id"],
+                              "amount": txn["amount"], "matched_by": matched_by})
+    remaining = max(0, split["remaining"] - txn["amount"])
+    db.update("splits", {"id": split["id"]},
+              {"remaining": remaining, "status": "done" if remaining == 0 else "open"})
+    db.update("transactions", {"id": txn["id"]}, {"category": "settlement", "status": "confirmed"})
+    return remaining
+
+
+def match_income(txn: dict) -> None:
+    """입금을 14일 이내의 열린 엔빵에 연결한다. 후보가 없으면 분류 결과를 그대로 둔다."""
+    since = (now() - timedelta(days=14)).isoformat(timespec="seconds")
+    amount = txn["amount"]
+    candidates = [split for split in db.select("splits", status="open", created_at=("gte", since))
+                  if abs(amount - split["total"] / split["n"]) <= 10 or amount <= split["remaining"]]
+    if len(candidates) == 1:
+        remaining = _settle(candidates[0], txn, "auto")
+        bot.send(f"정산 반영 · 남은 받을 돈 {remaining:,}원")
+    elif candidates:
+        rows = []
+        for split in candidates[:3]:
+            origin = db.select("transactions", id=split["txn_id"])[0]
+            rows.append([(f"{origin['cp_label']} {split['total']:,}원", f"s:{split['id']}:{txn['id']}")])
+        rows.append([("일반 입금", f"g:{txn['id']}")])
+        message_id = bot.send("어느 정산이야?", rows)
+        db.update("transactions", {"id": txn["id"]}, {
+            "status": "pending", "asked_at": now().isoformat(timespec="seconds"),
+            "tg_message_id": message_id,
+        })
+
+
+def month_summary() -> str:
+    t = now()
+    rows = db.select("monthly_summary", month=t.strftime("%Y-%m"))
+    lines = [f"{label(row['category'])} {row['spent']:,}원" for row in rows]
+    total = sum(row["spent"] for row in rows)
+    receivable = sum(split["remaining"] for split in db.select("splits", status="open"))
+    return "\n".join([f"{t.month}월 지출", *lines, f"합계 {total:,}원", f"받을 돈 {receivable:,}원"])
+
+
+def today_summary() -> str:
+    start = now().replace(hour=0, minute=0, second=0, microsecond=0)
+    my_shares = {split["txn_id"]: split["my_share"] for split in db.select("splits")}
+    rows = db.select("transactions", direction="out", ts=("gte", start.isoformat(timespec="seconds")))
+    spent = sum(my_shares.get(row["id"], row["amount"]) for row in rows if row.get("category") != "self")
+    return f"오늘 순지출 {spent:,}원"
 
 
 def load_state() -> dict:
@@ -214,7 +302,7 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _buttons(txn: dict) -> list:
+def _buttons(txn: dict, settings: dict) -> list:
     picks = []
     current = txn.get("category")
     if current in categories() and current not in {"etc", "transfer", "income"} and categories()[current].get("ask", True):
@@ -224,7 +312,13 @@ def _buttons(txn: dict) -> list:
         if len(picks) < 2 and code not in picks and categories()[code].get("ask", True):
             picks.append(code)
     rows = [[(label(code), f"c:{txn['id']}:{code}") for code in picks]]
-    rows.append([("엔빵", f"c:{txn['id']}:split"), (label("etc"), f"c:{txn['id']}:etc")])
+    split = ("엔빵", f"c:{txn['id']}:split")
+    other = (label("etc"), f"c:{txn['id']}:etc")
+    if _is_split_suspect(txn, current, settings):
+        rows.insert(0, [split])
+        rows.append([other])
+    else:
+        rows.append([split, other])
     if txn["direction"] == "in":
         rows.append([(label("income"), f"c:{txn['id']}:income")])
     return rows
@@ -234,12 +328,12 @@ def _unasked() -> list:
     return db.select("transactions", status="pending", asked_at=("is", "null"), _order="ts.asc")
 
 
-def _ask(txn: dict, t: datetime) -> None:
+def _ask(txn: dict, settings: dict, t: datetime) -> None:
     ts = datetime.fromisoformat(txn["ts"]).astimezone(KST)
     direction = "출금" if txn["direction"] == "out" else "입금"
     message_id = bot.send(
         f"[확인] {ts:%m/%d %H:%M} · {txn['cp_label']} {txn['amount']:,}원 {direction}. 뭐였어?\n"
-        f"예상 분류: {label(txn.get('category'))}\n버튼을 누르거나 답장해줘 (예: 치킨 4명)", _buttons(txn))
+        f"예상 분류: {label(txn.get('category'))}\n버튼을 누르거나 답장해줘 (예: 치킨 4명)", _buttons(txn, settings))
     db.update("transactions", {"id": txn["id"]}, {
         "asked_at": t.isoformat(timespec="seconds"), "tg_message_id": message_id})
 
@@ -252,7 +346,7 @@ def ask_pending(settings: dict, state: dict, t: datetime) -> None:
     for txn in _unasked():
         if state["asked_today"]["count"] >= int(settings.get("daily_ask_cap", 5)):
             break
-        _ask(txn, t)
+        _ask(txn, settings, t)
         state["asked_today"]["count"] += 1
 
 
@@ -264,7 +358,7 @@ def digest(settings: dict, state: dict, t: datetime) -> None:
     if pending:
         bot.send(f"오늘 미뤄진 {len(pending)}건")
         for txn in pending:
-            _ask(txn, t)
+            _ask(txn, settings, t)
         state["last_digest_date"] = today
 
 
@@ -281,15 +375,24 @@ def process_inbox() -> None:
             print(f"inbox {row['id']} 처리 실패: {type(exc).__name__}")
 
 
-def main() -> None:
+def _select_bot() -> None:
+    """TEST_ 값이 있으면 테스트 봇과 별도 state 파일을 쓴다. Actions에는 없으므로 본 봇을 쓴다.
+
+    TEST_ 값이 하나만 있으면 본 봇과 섞이지 않게 중단한다. 누락 시 첫 네트워크 호출 전에 멈춘다.
+    """
     global STATE_FILE
+    if os.environ.get("TEST_TELEGRAM_BOT_TOKEN") or os.environ.get("TEST_TELEGRAM_CHAT_ID"):
+        os.environ["TELEGRAM_BOT_TOKEN"] = env("TEST_TELEGRAM_BOT_TOKEN")
+        os.environ["TELEGRAM_CHAT_ID"] = env("TEST_TELEGRAM_CHAT_ID")
+        STATE_FILE = ROOT / "state.test.json"
+    else:
+        env("TELEGRAM_BOT_TOKEN")
+        env("TELEGRAM_CHAT_ID")
+
+
+def main() -> None:
     load_env()
-    # 일반/운영 토큰으로 대체하지 않는다. 누락 시 첫 네트워크 호출 전에 중단한다.
-    token = env("TEST_TELEGRAM_BOT_TOKEN")
-    chat_id = env("TEST_TELEGRAM_CHAT_ID")
-    os.environ["TELEGRAM_BOT_TOKEN"] = token
-    os.environ["TELEGRAM_CHAT_ID"] = chat_id
-    STATE_FILE = ROOT / "state.test.json"
+    _select_bot()
     state = load_state()
     settings = db.get_settings()
     t = now()

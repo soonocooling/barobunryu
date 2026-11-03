@@ -21,12 +21,30 @@ class PollingFlow(unittest.TestCase):
         self.assertEqual(get.call_args.kwargs["params"]["timeout"], 0)
         self.assertEqual(get.call_args.kwargs["timeout"], 10)
 
-    def test_missing_test_credentials_blocks_all_calls(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(watch, "load_env"), patch.object(watch.db, "get_settings") as settings, patch.object(watch.bot, "get_updates") as updates:
-            with self.assertRaisesRegex(RuntimeError, "TEST_TELEGRAM_BOT_TOKEN"):
-                watch.main()
-        settings.assert_not_called()
-        updates.assert_not_called()
+    def test_missing_credentials_blocks_all_calls(self):
+        for values, missing in [({}, "TELEGRAM_BOT_TOKEN"),
+                                ({"TEST_TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "1"}, "TEST_TELEGRAM_CHAT_ID")]:
+            with self.subTest(missing=missing), patch.dict(os.environ, values, clear=True), patch.object(watch, "STATE_FILE"), patch.object(watch, "load_env"), patch.object(watch.db, "get_settings") as settings, patch.object(watch.bot, "get_updates") as updates:
+                with self.assertRaisesRegex(RuntimeError, missing):
+                    watch.main()
+                settings.assert_not_called()
+                updates.assert_not_called()
+
+    def test_actions_env_uses_main_bot_and_state(self):
+        values = {"TELEGRAM_BOT_TOKEN": "main-token", "TELEGRAM_CHAT_ID": "1"}
+        with patch.dict(os.environ, values, clear=True), patch.object(watch, "STATE_FILE", watch.ROOT / "state.json"):
+            watch._select_bot()
+            self.assertEqual(watch.STATE_FILE.name, "state.json")
+            self.assertEqual(os.environ["TELEGRAM_BOT_TOKEN"], "main-token")
+
+    def test_test_env_overrides_main_bot_and_state(self):
+        values = {"TELEGRAM_BOT_TOKEN": "main-token", "TELEGRAM_CHAT_ID": "1",
+                  "TEST_TELEGRAM_BOT_TOKEN": "test-token", "TEST_TELEGRAM_CHAT_ID": "2"}
+        with patch.dict(os.environ, values, clear=True), patch.object(watch, "STATE_FILE", watch.ROOT / "state.json"):
+            watch._select_bot()
+            self.assertEqual(watch.STATE_FILE.name, "state.test.json")
+            self.assertEqual(os.environ["TELEGRAM_BOT_TOKEN"], "test-token")
+            self.assertEqual(os.environ["TELEGRAM_CHAT_ID"], "2")
 
     def test_main_continues_and_saves_offset(self):
         state = {"tg_offset": 0, "asked_today": {"date": None, "count": 0}, "last_digest_date": None}
@@ -57,7 +75,8 @@ class PollingFlow(unittest.TestCase):
             watch.ask_pending({}, state, t)
         send.assert_called_once()
         buttons = send.call_args.args[1]
-        self.assertIn(("식비", "c:1:food"), buttons[0])
+        self.assertEqual(buttons[0], [("엔빵", "c:1:split")])  # 3만원 이상 식비는 엔빵 의심
+        self.assertIn(("식비", "c:1:food"), buttons[1])
         self.assertEqual(fake.update.call_args.args[2]["tg_message_id"], 99)
         self.assertEqual(state["asked_today"]["count"], 1)
 

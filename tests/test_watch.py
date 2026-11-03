@@ -324,6 +324,11 @@ def test_inbox_empty_raw_is_marked_failed(world):
     world.run()
     assert world.db.rows("inbox")[0]["status"] == "failed"
     assert [m["text"] for m in world.bot.sent] == ["못 읽었어: "]
+def test_inbox_keeps_opposite_direction_with_same_amount_and_counterparty(world):
+    world.db.insert("inbox", {"raw_text": "10000 상대A 이체", "status": "new"})
+    world.db.insert("inbox", {"raw_text": "+10000 상대A", "status": "new"})
+    world.run()
+    assert [t["direction"] for t in world.txns()] == ["out", "in"]
 
 
 def test_split_button_then_reply(world):

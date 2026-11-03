@@ -86,7 +86,7 @@ def _handle_callback(data: str, message_id: int) -> None:
 def _is_duplicate(txn: dict, key: str) -> bool:
     ts = datetime.fromisoformat(txn["ts"])
     window = timedelta(minutes=2)
-    rows = db.select("transactions", amount=txn["amount"], cp_key=key,
+    rows = db.select("transactions", amount=txn["amount"], cp_key=key, direction=txn["direction"],
                      ts=("gte", (ts - window).isoformat(timespec="seconds")))
     return any(datetime.fromisoformat(row["ts"]) <= ts + window for row in rows)
 
